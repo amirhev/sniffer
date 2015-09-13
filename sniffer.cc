@@ -8,8 +8,12 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include<netinet/ip.h>
-#include<netinet/tcp.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <linux/if_packet.h>
+#include <linux/if_ether.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
@@ -24,13 +28,27 @@ std::string pcapfile;
 int streams = 65536;
 std::vector<uint16_t> ports;
 
-flow_map_t flows[flowhash];
+flow_map_t flows[hashsize];
+
+uint64_t flows_inserts = 0;
+uint64_t flows_removes = 0;
 
 int main(int argc, char **argv)
 {
     parse_args(argc, argv);
 
-    int sock_raw = socket(AF_INET , SOCK_RAW , IPPROTO_TCP);
+    if(interface.length())
+        process_device();
+    else if (pcapfile.length())
+        process_file();
+
+    return 0;
+}
+
+int process_device()
+{
+    //int sock_raw = socket(AF_INET , SOCK_RAW , IPPROTO_TCP);
+    int sock_raw = socket(AF_PACKET , SOCK_RAW,  htons(ETH_P_ALL));
     if(sock_raw < 0)
     {
         std::cerr << "Error create socket" << std::endl;
@@ -41,31 +59,134 @@ int main(int argc, char **argv)
         std::cerr << "Error bind on interface " << interface << std::endl;
         return -1;
     }
-    int count = 0;
+
     while(true)
     {
-        struct sockaddr saddr;
+        struct sockaddr_ll saddr;
         int saddr_size = sizeof(saddr);
         char buffer[2000];
-        int sz = recvfrom(sock_raw , buffer , sizeof(buffer) , 0 , &saddr , (socklen_t*)&saddr_size);
+        int sz = recvfrom(sock_raw, buffer, sizeof(buffer), 0, (struct sockaddr*)&saddr , (socklen_t*)&saddr_size);
         if(sz <0 )
         {
             std::cerr << "Error recv packet: " << strerror(errno) << "(" << errno << ")";
             return 1;
         }
-        struct iphdr *iph = (struct iphdr*)buffer;
 
-        struct tcphdr *tcph=(struct tcphdr*)(buffer + iph->ihl*4);
-        parse_data(buffer + iph->ihl*4 + tcph->doff*4, sz - (iph->ihl*4 + tcph->doff*4));
+        ethhdr *eth = (ethhdr*)buffer;
+        if(ntohs(eth->h_proto) != ETH_P_IP)
+            continue;
+
+        struct iphdr *iph = (struct iphdr*)(buffer + sizeof(ethhdr));
+        if(iph->protocol != IPPROTO_TCP)
+            continue;
+
+        struct tcphdr *tcph=(struct tcphdr*)(buffer + sizeof(ethhdr) + iph->ihl*4);
+        flow_t flow = {iph->saddr, iph->daddr, tcph->source, tcph->dest};
+        uint8_t side = normal_flow(flow);
+        flow_data_t flow_data;
+
+        const char * data = buffer + sizeof(ethhdr) + iph->ihl*4 + tcph->doff*4;
+        unsigned length = sz - (sizeof(ethhdr) + iph->ihl*4 + tcph->doff*4);
+
+        if( length == 0 && tcph->ack && !tcph->fin && !tcph->rst)
+            continue; // do not need empty ack
+
+        if( tcph->fin || tcph->rst || length )
+        {
+            unsigned hf = hashflow(flow);
+            auto it = flows[hf].emplace(flow,flow_data);
+            if(it.second)
+            {
+                ++flows_inserts;
+                //printf("OPEN FLOW (%lu-%lu=%lu)\n",flows_inserts, flows_removes, flows_inserts-flows_removes);
+            }
+            if(tcph->fin && it.second)
+            {
+                flows[hf].erase(flow);
+                ++flows_removes;
+                //printf("CLOSE FLOW (%lu-%lu=%lu)\n",flows_inserts, flows_removes, flows_inserts-flows_removes);
+                continue;
+            }
+            if(tcph->fin || tcph->rst)
+            {
+                it.first->second.fin[side] = true;
+                if(it.first->second.fin[1-side] || tcph->rst) // both fin got
+                {
+                    flows[hf].erase(flow);
+                    ++flows_removes;
+                    //printf("CLOSE FLOW (%lu-%lu=%lu)\n",flows_inserts, flows_removes, flows_inserts-flows_removes);
+                    continue;
+                }
+            }
+
+            if(length)
+            {
+                parse_data(data, length, side, it.first->second);
+            }
+
+        }
+
     }
     close(sock_raw);
 
     return 0;
 }
 
-int parse_data(char* data, unsigned len)
+int process_file()
 {
-    //TODO: insert into flows
+    return 0;
+}
+
+int parse_data(const char* data, unsigned len, uint8_t side, flow_data_t& flow_data)
+{
+    if(flow_data.probed && !flow_data.http)
+        return 0;
+
+    if(!flow_data.probed)
+    {
+        flow_data.probed = true;
+        if( strncasecmp(data,"GET",3) && strncasecmp(data,"POST",4) )
+        {
+            flow_data.http = false;
+
+            return 0;
+        }
+        else
+        {
+            flow_data.http = true;
+            flow_data.cli_side = side;
+        }
+
+    }
+
+    if( side == flow_data.cli_side )
+    {
+        if( !strncasecmp(data,"GET",3) || !strncasecmp(data,"POST",4) )
+        {
+            std::string str;
+            std::stringstream ss(data);
+            std::getline(ss,str);
+            flow_data.reqs.push_back(str);
+        }
+    }
+    else
+    {
+        if( !strncasecmp(data,"HTTP/",5))
+        {
+            if(flow_data.reqs.size())
+            {
+                std::string str;
+                std::stringstream ss(data);
+                std::getline(ss,str);
+
+                std::cout << "REQUEST: " << flow_data.reqs.front() << std::endl;
+                std::cout << "RESPONSE: " << str << std::endl;
+                flow_data.reqs.pop_front();
+            }
+        }
+    }
+
+    return 0;
 }
 
 void usage(char **argv, const char* message=NULL)
