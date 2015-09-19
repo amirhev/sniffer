@@ -33,6 +33,8 @@ flow_map_t flows[hashsize];
 uint64_t flows_inserts = 0;
 uint64_t flows_removes = 0;
 
+flow_data_t *curr_flow = NULL;
+
 int main(int argc, char **argv)
 {
     parse_args(argc, argv);
@@ -47,7 +49,6 @@ int main(int argc, char **argv)
 
 int process_device()
 {
-    //int sock_raw = socket(AF_INET , SOCK_RAW , IPPROTO_TCP);
     int sock_raw = socket(AF_PACKET , SOCK_RAW,  htons(ETH_P_ALL));
     if(sock_raw < 0)
     {
@@ -139,16 +140,16 @@ int process_file()
 
 int parse_data(const char* data, unsigned len, uint8_t side, flow_data_t& flow_data)
 {
+    curr_flow = &flow_data;
     if(flow_data.probed && !flow_data.http)
         return 0;
 
     if(!flow_data.probed)
     {
         flow_data.probed = true;
-        if( strncasecmp(data,"GET",3) && strncasecmp(data,"POST",4) )
+        if( flow_data.cli.parse_cli(data, len, 0) < 0 )
         {
             flow_data.http = false;
-
             return 0;
         }
         else
@@ -161,28 +162,18 @@ int parse_data(const char* data, unsigned len, uint8_t side, flow_data_t& flow_d
 
     if( side == flow_data.cli_side )
     {
-        if( !strncasecmp(data,"GET",3) || !strncasecmp(data,"POST",4) )
+        if( flow_data.cli.parse_cli(data, len, 0) < 0 )
         {
-            std::string str;
-            std::stringstream ss(data);
-            std::getline(ss,str);
-            flow_data.reqs.push_back(str);
+            //std::cout << "Error parse cli " << std::endl;
+            flow_data.http = false;
         }
     }
     else
     {
-        if( !strncasecmp(data,"HTTP/",5))
+        if( flow_data.srv.parse_srv(data, len, 0) < 0 )
         {
-            if(flow_data.reqs.size())
-            {
-                std::string str;
-                std::stringstream ss(data);
-                std::getline(ss,str);
-
-                std::cout << "REQUEST: " << flow_data.reqs.front() << std::endl;
-                std::cout << "RESPONSE: " << str << std::endl;
-                flow_data.reqs.pop_front();
-            }
+            //std::cout << "Error parse srv " << std::endl;
+            flow_data.http = false;
         }
     }
 
@@ -238,3 +229,20 @@ void parse_args(int argc, char **argv)
     if(!interface.length() && !pcapfile.length())
         usage(argv);
 }
+
+void got_http_request(std::string req)
+{
+    curr_flow->reqs.push_back(req);
+}
+
+void got_http_response(std::string res)
+{
+    if(curr_flow->reqs.empty())
+    {
+        std::cout << "Error: no requests!" << std::endl;
+        return;
+    }
+    std::cout << curr_flow->reqs.front() << " " << res << std::endl;
+    curr_flow->reqs.pop_front();
+}
+

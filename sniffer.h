@@ -1,9 +1,11 @@
-#include <map>
-#include <list>
 /**
       HTTP packet sniffer and parser header file
       Author: Ilya Gavrilov <gilyav@gmail.com>
 */
+
+#include <map>
+#include <list>
+#include "http.h"
 
 static const int hashsize = 65536;
 
@@ -51,6 +53,8 @@ unsigned hashflow(flow_t f)
     return (f.src+f.dst+f.sport+f.dport)%hashsize;
 }
 
+void got_http_request(std::string req);
+void got_http_response(std::string res);
 
 struct flow_data_t
 {
@@ -60,12 +64,18 @@ struct flow_data_t
     bool probed;
     bool http;
     uint8_t cli_side;
-    std::list<std::string> reqs;
+
+    typedef std::list<std::string> req_list_t;
+    req_list_t reqs;
+    http_state_t cli;
+    http_state_t srv;
 
     flow_data_t(): probed(false), http(false), cli_side(0)
     {
         fin[0] = fin[1] = false;
         bzero(&last_time, sizeof(last_time));
+        cli.init_cli(got_http_request);
+        srv.init_srv(got_http_response);
     }
 };
 
