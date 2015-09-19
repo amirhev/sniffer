@@ -113,10 +113,7 @@
 		( http_version . [ \t]+ . digit {3} ${add(code,*p);} . [^\r\n]* . CRLF . header* . CRLF ) 
 		@got_http_response;
 
-	http_filter = ( http_request >reset_http @end_http_headers | 
-		            http_response >reset_http @end_http_headers )+ ;
-
-	http_content := ( any+ ) @got_http_content ;
+	http_content := ( any+ ) @got_http_content;
 
     action got_chunked_len
     {

@@ -357,24 +357,24 @@ _resume:
 	case 0: {
 		_widec = (short)(128 + ((*p) - -128));
 		if ( 
-/* #line 126 "./http.rl" */
+/* #line 123 "./http.rl" */
 data_read_len-- > 0 ) _widec += 256;
 		break;
 	}
 	case 1: {
 		_widec = (short)(640 + ((*p) - -128));
 		if ( 
-/* #line 126 "./http.rl" */
+/* #line 123 "./http.rl" */
 data_read_len <= 0 ) _widec += 256;
 		break;
 	}
 	case 2: {
 		_widec = (short)(1152 + ((*p) - -128));
 		if ( 
-/* #line 126 "./http.rl" */
+/* #line 123 "./http.rl" */
 data_read_len-- > 0 ) _widec += 256;
 		if ( 
-/* #line 126 "./http.rl" */
+/* #line 123 "./http.rl" */
 data_read_len <= 0 ) _widec += 512;
 		break;
 	}
@@ -542,13 +542,13 @@ _match:
 	{add(code,*p);}
 	break;
 	case 15:
-/* #line 122 "./http.rl" */
+/* #line 119 "./http.rl" */
 	{
         content_len += data_len;
     }
 	break;
 	case 16:
-/* #line 126 "./http.rl" */
+/* #line 123 "./http.rl" */
 	{if(data_len==0) { content_len_str = std::to_string(content_len); end_msg(cli, this); {cs = stack[--top]; goto _again;}}}
 	break;
 /* #line 555 "http_parser.cc" */
@@ -1367,24 +1367,24 @@ _resume:
 	case 0: {
 		_widec = (short)(128 + ((*p) - -128));
 		if ( 
-/* #line 126 "./http.rl" */
+/* #line 123 "./http.rl" */
 data_read_len-- > 0 ) _widec += 256;
 		break;
 	}
 	case 1: {
 		_widec = (short)(640 + ((*p) - -128));
 		if ( 
-/* #line 126 "./http.rl" */
+/* #line 123 "./http.rl" */
 data_read_len <= 0 ) _widec += 256;
 		break;
 	}
 	case 2: {
 		_widec = (short)(1152 + ((*p) - -128));
 		if ( 
-/* #line 126 "./http.rl" */
+/* #line 123 "./http.rl" */
 data_read_len-- > 0 ) _widec += 256;
 		if ( 
-/* #line 126 "./http.rl" */
+/* #line 123 "./http.rl" */
 data_read_len <= 0 ) _widec += 512;
 		break;
 	}
@@ -1562,13 +1562,13 @@ _match:
 	{add(req_line,*p);}
 	break;
 	case 17:
-/* #line 122 "./http.rl" */
+/* #line 119 "./http.rl" */
 	{
         content_len += data_len;
     }
 	break;
 	case 18:
-/* #line 126 "./http.rl" */
+/* #line 123 "./http.rl" */
 	{if(data_len==0) { content_len_str = std::to_string(content_len); end_msg(cli, this); {cs = stack[--top]; goto _again;}}}
 	break;
 /* #line 1575 "http_parser.cc" */

@@ -33,7 +33,8 @@ flow_map_t flows[hashsize];
 uint64_t flows_inserts = 0;
 uint64_t flows_removes = 0;
 
-flow_data_t *curr_flow = NULL;
+flow_t *curr_flow = NULL;
+flow_data_t *curr_flow_data = NULL;
 
 int main(int argc, char **argv)
 {
@@ -122,7 +123,7 @@ int process_device()
 
             if(length)
             {
-                parse_data(data, length, side, it.first->second);
+                parse_data(data, length, side, it.first->first, it.first->second);
             }
 
         }
@@ -138,9 +139,10 @@ int process_file()
     return 0;
 }
 
-int parse_data(const char* data, unsigned len, uint8_t side, flow_data_t& flow_data)
+int parse_data(const char* data, unsigned len, uint8_t side, flow_t flow, flow_data_t& flow_data)
 {
-    curr_flow = &flow_data;
+    curr_flow = &flow;
+    curr_flow_data = &flow_data;
     if(flow_data.probed && !flow_data.http)
         return 0;
 
@@ -232,17 +234,31 @@ void parse_args(int argc, char **argv)
 
 void got_http_request(std::string req)
 {
-    curr_flow->reqs.push_back(req);
+    curr_flow_data->reqs.push_back(req);
 }
 
 void got_http_response(std::string res)
 {
-    if(curr_flow->reqs.empty())
+    if(curr_flow_data->reqs.empty())
     {
         std::cout << "Error: no requests!" << std::endl;
         return;
     }
-    std::cout << curr_flow->reqs.front() << " " << res << std::endl;
-    curr_flow->reqs.pop_front();
+    struct in_addr ip;
+    ip.s_addr = curr_flow->src;
+    std::string addr1 = inet_ntoa(ip);
+    ip.s_addr = curr_flow->dst;
+    std::string addr2 = inet_ntoa(ip);
+    uint8_t cli_side = curr_flow_data->cli_side;
+    time_t curr_time;
+    struct tm *info;
+    time( &curr_time );
+    info = localtime( &curr_time );
+    char buffer[20];
+    strftime(buffer,20,"%m/%d/%y %H:%M:%S", info);
+
+    std::cout << buffer << " " << (cli_side?addr2:addr1) << " " << (cli_side?addr1:addr2);
+    std::cout << curr_flow_data->reqs.front() << " " << res << std::endl;
+    curr_flow_data->reqs.pop_front();
 }
 

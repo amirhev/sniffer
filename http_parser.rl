@@ -26,7 +26,7 @@ void end_msg(bool cli, http_state_t *state)
     machine http_srv;
     include http "./http.rl";
 
-    main :=  (http_response >reset_http @end_http_headers)+;
+    main :=  (http_response >reset_http @end_http_headers)+ ;
 }%%
 
 %% write data;

@@ -83,6 +83,6 @@ typedef std::map<flow_t,flow_data_t> flow_map_t;
 
 int process_device();
 int process_file();
-int parse_data(const char* data, unsigned len, uint8_t side, flow_data_t& flow_data);
+int parse_data(const char* data, unsigned len, uint8_t side, flow_t flow, flow_data_t& flow_data);
 
 void parse_args(int argc, char **argv);
