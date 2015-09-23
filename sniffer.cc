@@ -21,7 +21,9 @@
 #include <vector>
 #include <sstream>
 #include <iostream>
+#include <algorithm>
 #include "sniffer.h"
+#include "pcap.h"
 
 std::string interface;
 std::string pcapfile;
@@ -74,59 +76,7 @@ int process_device()
             return 1;
         }
 
-        ethhdr *eth = (ethhdr*)buffer;
-        if(ntohs(eth->h_proto) != ETH_P_IP)
-            continue;
-
-        struct iphdr *iph = (struct iphdr*)(buffer + sizeof(ethhdr));
-        if(iph->protocol != IPPROTO_TCP)
-            continue;
-
-        struct tcphdr *tcph=(struct tcphdr*)(buffer + sizeof(ethhdr) + iph->ihl*4);
-        flow_t flow = {iph->saddr, iph->daddr, tcph->source, tcph->dest};
-        uint8_t side = normal_flow(flow);
-        flow_data_t flow_data;
-
-        const char * data = buffer + sizeof(ethhdr) + iph->ihl*4 + tcph->doff*4;
-        unsigned length = sz - (sizeof(ethhdr) + iph->ihl*4 + tcph->doff*4);
-
-        if( length == 0 && tcph->ack && !tcph->fin && !tcph->rst)
-            continue; // do not need empty ack
-
-        if( tcph->fin || tcph->rst || length )
-        {
-            unsigned hf = hashflow(flow);
-            auto it = flows[hf].emplace(flow,flow_data);
-            if(it.second)
-            {
-                ++flows_inserts;
-                //printf("OPEN FLOW (%lu-%lu=%lu)\n",flows_inserts, flows_removes, flows_inserts-flows_removes);
-            }
-            if(tcph->fin && it.second)
-            {
-                flows[hf].erase(flow);
-                ++flows_removes;
-                //printf("CLOSE FLOW (%lu-%lu=%lu)\n",flows_inserts, flows_removes, flows_inserts-flows_removes);
-                continue;
-            }
-            if(tcph->fin || tcph->rst)
-            {
-                it.first->second.fin[side] = true;
-                if(it.first->second.fin[1-side] || tcph->rst) // both fin got
-                {
-                    flows[hf].erase(flow);
-                    ++flows_removes;
-                    //printf("CLOSE FLOW (%lu-%lu=%lu)\n",flows_inserts, flows_removes, flows_inserts-flows_removes);
-                    continue;
-                }
-            }
-
-            if(length)
-            {
-                parse_data(data, length, side, it.first->first, it.first->second);
-            }
-
-        }
+        process_packet(buffer, sz);
 
     }
     close(sock_raw);
@@ -136,7 +86,110 @@ int process_device()
 
 int process_file()
 {
+    FILE *pcap = fopen(pcapfile.c_str(), "r");
+    if(!pcap)
+    {
+        std::cerr << "Error open file: " << pcapfile << std::endl;
+        return -1;
+    }
+    pcap_file_hdr_t file_hdr;
+    if ( fread(&file_hdr, 1, sizeof(file_hdr), pcap) != sizeof(file_hdr) )
+    {
+        std::cerr << "Error read filehdr file: " << pcapfile << std::endl;
+        return -1;
+    }
+
+    while(!feof(pcap))
+    {
+        char buffer[2000];
+        pcap_hdr_t hdr;
+        size_t sz = fread(&hdr, 1, sizeof(hdr), pcap); 
+        if(sz == 0) break;
+        if ( sz != sizeof(hdr) )
+        {
+            std::cerr << "Error read packethdr size: " << sz << " file: " << pcapfile << std::endl;
+            return -1;
+        }
+        if(hdr.caplen > sizeof(buffer))
+        {
+            std::cerr << "Error wrong packet size: " << hdr.caplen << " file: " << pcapfile << std::endl;
+            return -1;
+        }
+        if ( fread(buffer, 1, hdr.caplen, pcap) != hdr.caplen )
+        {
+            std::cerr << "Error read packet file: " << pcapfile << std::endl;
+            return -1;
+        }
+
+        process_packet(buffer, hdr.caplen);
+    }
+    fclose(pcap);
+
     return 0;
+}
+
+bool process_packet(char *buffer, unsigned len)
+{
+    ethhdr *eth = (ethhdr*)buffer;
+    if(ntohs(eth->h_proto) != ETH_P_IP)
+        return false;
+
+    struct iphdr *iph = (struct iphdr*)(buffer + sizeof(ethhdr));
+    if(iph->protocol != IPPROTO_TCP)
+        return false;
+
+    struct tcphdr *tcph=(struct tcphdr*)(buffer + sizeof(ethhdr) + iph->ihl*4);
+    if( 
+            !ports.empty() &&
+            std::find(ports.begin(), ports.end(), ntohs(tcph->source)) == ports.end() &&
+            std::find(ports.begin(), ports.end(), ntohs(tcph->dest)) == ports.end()
+      )
+        return false;
+    unsigned tcpl = len - (sizeof(ethhdr) + iph->ihl*4);
+    flow_t flow = {iph->saddr, iph->daddr, tcph->source, tcph->dest};
+    uint8_t side = normal_flow(flow);
+    flow_data_t flow_data;
+
+    const char * data = buffer + sizeof(ethhdr) + iph->ihl*4 + tcph->doff*4;
+    unsigned length = len - (sizeof(ethhdr) + iph->ihl*4 + tcph->doff*4);
+
+    if( length == 0 && !tcph->syn && tcph->ack && !tcph->fin && !tcph->rst)
+        return false; // do not need empty ack
+
+    unsigned hf = hashflow(flow);
+    auto it = flows[hf].emplace(flow,flow_data);
+    if(it.second)
+    {
+        ++flows_inserts;
+        //printf("OPEN FLOW (%lu-%lu=%lu)\n",flows_inserts, flows_removes, flows_inserts-flows_removes);
+    }
+    if(tcph->fin && it.second)
+    {
+        flows[hf].erase(flow);
+        ++flows_removes;
+        //printf("CLOSE FLOW (%lu-%lu=%lu)\n",flows_inserts, flows_removes, flows_inserts-flows_removes);
+        return false;
+    }
+    it.first->second.cache.put(tcph, tcpl, side);
+    if(tcph->fin || tcph->rst)
+    {
+        it.first->second.fin[side] = true;
+        if(it.first->second.fin[1-side] || tcph->rst) // both fin got
+        {
+            flows[hf].erase(flow);
+            ++flows_removes;
+            //printf("CLOSE FLOW (%lu-%lu=%lu)\n",flows_inserts, flows_removes, flows_inserts-flows_removes);
+            return false;
+        }
+    }
+
+    std::string payload = it.first->second.cache.get(side);
+    if(payload.length())
+    {
+        parse_data(payload.c_str(), payload.length(), side, it.first->first, it.first->second);
+    }
+
+    return true;
 }
 
 int parse_data(const char* data, unsigned len, uint8_t side, flow_t flow, flow_data_t& flow_data)
@@ -152,21 +205,20 @@ int parse_data(const char* data, unsigned len, uint8_t side, flow_t flow, flow_d
         if( flow_data.cli.parse_cli(data, len, 0) < 0 )
         {
             flow_data.http = false;
-            return 0;
         }
         else
         {
             flow_data.http = true;
             flow_data.cli_side = side;
         }
-
+        return 0;
     }
 
     if( side == flow_data.cli_side )
     {
         if( flow_data.cli.parse_cli(data, len, 0) < 0 )
         {
-            //std::cout << "Error parse cli " << std::endl;
+            std::cout << "Error parse cli " << std::endl;
             flow_data.http = false;
         }
     }
@@ -174,7 +226,7 @@ int parse_data(const char* data, unsigned len, uint8_t side, flow_t flow, flow_d
     {
         if( flow_data.srv.parse_srv(data, len, 0) < 0 )
         {
-            //std::cout << "Error parse srv " << std::endl;
+            std::cout << "Error parse srv " << std::endl;
             flow_data.http = false;
         }
     }

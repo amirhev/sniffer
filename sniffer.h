@@ -6,6 +6,7 @@
 #include <map>
 #include <list>
 #include "http.h"
+#include "tcp.h"
 
 static const int hashsize = 65536;
 
@@ -77,12 +78,14 @@ struct flow_data_t
         cli.init_cli(got_http_request);
         srv.init_srv(got_http_response);
     }
+    tcp_cache_t cache;
 };
 
 typedef std::map<flow_t,flow_data_t> flow_map_t;
 
 int process_device();
 int process_file();
+bool process_packet(char *buffer, unsigned len);
 int parse_data(const char* data, unsigned len, uint8_t side, flow_t flow, flow_data_t& flow_data);
 
 void parse_args(int argc, char **argv);

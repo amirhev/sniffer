@@ -464,12 +464,12 @@ _match:
 	case 3:
 /* #line 34 "./http.rl" */
 	{
-        if(content_len!=0) {
-            content_start = len + (p-data);
-            {stack[top++] = cs; cs = 71; goto _again;}
-        }
         if(chunked != 0) {
             {stack[top++] = cs; cs = 72; goto _again;}
+        }
+        else if(content_len!=0) {
+            content_start = len + (p-data);
+            {stack[top++] = cs; cs = 71; goto _again;}
         }
 
         end_msg(cli, this);
@@ -520,7 +520,7 @@ _match:
 	case 10:
 /* #line 79 "./http.rl" */
 	{
-        data_len = (data_len <<4 ) + (*p>'a'?*p-87:(*p>'A'?*p-55:*p-'0'));
+        data_len = (data_len <<4 ) + (*p>='a'?*p-87:(*p>='A'?*p-55:*p-'0'));
     }
 	break;
 	case 11:
@@ -1484,12 +1484,12 @@ _match:
 	case 5:
 /* #line 34 "./http.rl" */
 	{
-        if(content_len!=0) {
-            content_start = len + (p-data);
-            {stack[top++] = cs; cs = 253; goto _again;}
-        }
         if(chunked != 0) {
             {stack[top++] = cs; cs = 254; goto _again;}
+        }
+        else if(content_len!=0) {
+            content_start = len + (p-data);
+            {stack[top++] = cs; cs = 253; goto _again;}
         }
 
         end_msg(cli, this);
@@ -1540,7 +1540,7 @@ _match:
 	case 12:
 /* #line 79 "./http.rl" */
 	{
-        data_len = (data_len <<4 ) + (*p>'a'?*p-87:(*p>'A'?*p-55:*p-'0'));
+        data_len = (data_len <<4 ) + (*p>='a'?*p-87:(*p>='A'?*p-55:*p-'0'));
     }
 	break;
 	case 13:

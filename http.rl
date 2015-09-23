@@ -32,12 +32,12 @@
 	}
 
 	action end_http_headers {
-        if(content_len!=0) {
-            content_start = len + (p-data);
-            fcall http_content;
-        }
         if(chunked != 0) {
             fcall http_chunked_content;
+        }
+        else if(content_len!=0) {
+            content_start = len + (p-data);
+            fcall http_content;
         }
 
         end_msg(cli, this);
@@ -77,7 +77,7 @@
 
     action save_xdigit
     {
-        data_len = (data_len <<4 ) + (*p>'a'?*p-87:(*p>'A'?*p-55:*p-'0'));
+        data_len = (data_len <<4 ) + (*p>='a'?*p-87:(*p>='A'?*p-55:*p-'0'));
     }
 
     action got_hex_len
@@ -106,7 +106,7 @@
 	header = header_content_length | header_transfer_encoding | header_host | header_other;
 
 	http_request = 
-		( (method . [ \t]+ . url . [ \t]+ . http_version) ${add(req_line,*p);} . CRLF . header* . CRLF ) 
+		( (method . [ \t]+ . url . [ \t]+ . http_version) ${add(req_line,*p);} . CRLF . header* . CRLF )
 		@got_http_request;
 
 	http_response = 
